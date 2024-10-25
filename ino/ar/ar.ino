@@ -85,8 +85,6 @@ void loop() {
         Serial.write(c);
 
         if (c == '\n') {
-          // If the current line is blank, you got two newline characters in a row.
-          // That's the end of the client HTTP request, so send a response:
           if (currentLine.length() == 0) {
             if (isPostRequest) {
               while (client.available()) {
@@ -97,7 +95,6 @@ void loop() {
             }
             break;
           } else {
-            // Check the request type
             if (currentLine.startsWith("GET / ")) {
               sendIndexPage(client);
             } else if (currentLine.startsWith("GET /json")) {
@@ -120,13 +117,11 @@ void loop() {
         }
       }
     }
-    // Close the connection
     client.stop();
-    Serial.println("Client disconnected.");
   }
 }
 
-void sendIndexPage(WiFiClient& client) {
+void sendIndexPage(WiFiClient&client) {
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:text/html");
   client.println("Connection: close");
@@ -142,19 +137,17 @@ void sendIndexPage(WiFiClient& client) {
   client.println("</html>");
 }
 
-void sendJsonData(WiFiClient& client) {
+void sendJsonData(WiFiClient&client) {
   StaticJsonDocument<200> doc;
   doc["MAC Address"] = mac_address;
   doc["id"] = id;
   doc["machine_name"] = machine_name;
   doc["fix_move"] = fix_move;
   doc["status"] = "ok";
-
   JsonArray result = doc.createNestedArray("result");
   for (int i = 0; i < 6; i++) {
-    result.add(random(2)); // Randomly add either a 0 or a 1
+    result.add(random(2));
   }
-
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:application/json");
   client.println("Connection: close");
@@ -162,14 +155,15 @@ void sendJsonData(WiFiClient& client) {
   serializeJson(doc, client);
 }
 
-void send404(WiFiClient& client) {
+void send404(WiFiClient&client) {
   client.println("HTTP/1.1 404 Not Found");
   client.println("Content-type:text/html");
   client.println("Connection: close");
   client.println();
   client.println("<html><body><h1>404: Not Found</h1></body></html>");
 }
-void sendSettingsPage(WiFiClient& client) {
+
+void sendSettingsPage(WiFiClient&client) {
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:text/html");
   client.println("Connection: close");
@@ -190,7 +184,7 @@ void sendSettingsPage(WiFiClient& client) {
   client.println("</body></html>");
 }
 
-void handlePostData(WiFiClient& client, String postData) {
+void handlePostData(WiFiClient&client, String postData) {
   int idIndex = postData.indexOf("id=");
   int machineNameIndex = postData.indexOf("machine_name=");
   int fixMoveIndex = postData.indexOf("fix_move=");
@@ -207,27 +201,16 @@ void handlePostData(WiFiClient& client, String postData) {
     Serial.print("Updated Fix/Move: ");
     Serial.println(fix_move);
 
-    // Write updated values to EEPROM
     EEPROM.write(idAddress, id);
-
-    for (int i = 0; i < machine_name.length(); i++) {
+    for (int i = 0; i < machine_name.length(); i++)
       EEPROM.write(machineNameAddress + i, machine_name[i]);
-    }
-
-    for (int i = machine_name.length(); i < 20; i++) { // Clear remaining space
+    for (int i = machine_name.length(); i < 20; i++)
       EEPROM.write(machineNameAddress + i, '\0');
-    }
-
-    for (int i = 0; i < fix_move.length(); i++) {
+    for (int i = 0; i < fix_move.length(); i++)
       EEPROM.write(fixMoveAddress + i, fix_move[i]);
-    }
-
-    for (int i = fix_move.length(); i < 4; i++) { // Clear remaining space
+    for (int i = fix_move.length(); i < 4; i++)
       EEPROM.write(fixMoveAddress + i, '\0');
-    }
   }
-
-  // Send HTTP response
   client.println("HTTP/1.1 302 Found");
   client.println("Location: /setting");
   client.println("Connection: close");
