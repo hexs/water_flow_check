@@ -1,13 +1,20 @@
 #include <WiFiS3.h>
 #include <ArduinoJson.h>
+#include <EEPROM.h>
+
+const int idAddress = 0;
+const int machineNameAddress = idAddress + sizeof(int);
+const int fixMoveAddress = machineNameAddress + 20;
+
 //char ssid[] = "APHTV125";
 //char pass[] = "#aphtv125@";
 char ssid[] = "S000";
 char pass[] = "00000000";
+
 String mac_address = "";
-int id = 1;
-String machine_name = "1001T";
-String fix_move = "fix";
+int id;
+String machine_name;
+String fix_move;
 
 //IPAddress local_ip(192, 168, 125, 243);
 //IPAddress gateway(192, 168, 125, 254);
@@ -18,6 +25,21 @@ WiFiServer server(80);
 
 void setup() {
   Serial.begin(9600);
+
+  id = EEPROM.read(idAddress);
+  char machineNameBuffer[21];
+  for (int i = 0; i < 20; i++) {
+    machineNameBuffer[i] = EEPROM.read(machineNameAddress + i);
+  }
+  machineNameBuffer[20] = '\0';
+  machine_name = String(machineNameBuffer);
+
+  char fixMoveBuffer[5];
+  for (int i = 0; i < 4; i++) {
+    fixMoveBuffer[i] = EEPROM.read(fixMoveAddress + i);
+  }
+  fixMoveBuffer[4] = '\0';
+  fix_move = String(fixMoveBuffer);
 
   if (WiFi.status() == WL_NO_MODULE) {
     Serial.println("Communication with WiFi module failed!");
@@ -56,12 +78,12 @@ void loop() {
     String currentLine = "";
     String postData = "";
     bool isPostRequest = false;
-    
+
     while (client.connected()) {
       if (client.available()) {
         char c = client.read();
         Serial.write(c);
-        
+
         if (c == '\n') {
           // If the current line is blank, you got two newline characters in a row.
           // That's the end of the client HTTP request, so send a response:
@@ -184,6 +206,25 @@ void handlePostData(WiFiClient& client, String postData) {
     Serial.println(machine_name);
     Serial.print("Updated Fix/Move: ");
     Serial.println(fix_move);
+
+    // Write updated values to EEPROM
+    EEPROM.write(idAddress, id);
+
+    for (int i = 0; i < machine_name.length(); i++) {
+      EEPROM.write(machineNameAddress + i, machine_name[i]);
+    }
+
+    for (int i = machine_name.length(); i < 20; i++) { // Clear remaining space
+      EEPROM.write(machineNameAddress + i, '\0');
+    }
+
+    for (int i = 0; i < fix_move.length(); i++) {
+      EEPROM.write(fixMoveAddress + i, fix_move[i]);
+    }
+
+    for (int i = fix_move.length(); i < 4; i++) { // Clear remaining space
+      EEPROM.write(fixMoveAddress + i, '\0');
+    }
   }
 
   // Send HTTP response
