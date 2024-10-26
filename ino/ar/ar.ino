@@ -1,30 +1,47 @@
 #include <WiFiS3.h>
 #include <ArduinoJson.h>
 #include <EEPROM.h>
+#include "Arduino_LED_Matrix.h"
+
+ArduinoLEDMatrix matrix;
+byte frame[8][12] = {
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+  { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+};
 
 const int idAddress = 0;
 const int machineNameAddress = idAddress + sizeof(int);
 const int fixMoveAddress = machineNameAddress + 20;
 
-//char ssid[] = "APHTV125";
-//char pass[] = "#aphtv125@";
-char ssid[] = "S000";
-char pass[] = "00000000";
+char ssid[] = "APHTV125";
+char pass[] = "#aphtv125@";
+//char ssid[] = "S000";
+//char pass[] = "00000000";
 
 String mac_address = "";
+long rssi;
 int id;
 String machine_name;
 String fix_move;
 
-//IPAddress local_ip(192, 168, 125, 243);
-//IPAddress gateway(192, 168, 125, 254);
-//IPAddress subnet(255, 255, 255, 0);
-//IPAddress dns_server(192, 168, 225, 50);
+String checked;
+
+IPAddress local_ip(192, 168, 125, 243);
+IPAddress gateway(192, 168, 125, 254);
+IPAddress subnet(255, 255, 255, 0);
+IPAddress dns_server(192, 168, 225, 50);
 
 WiFiServer server(80);
 
 void setup() {
   Serial.begin(9600);
+  matrix.begin();
 
   id = EEPROM.read(idAddress);
   char machineNameBuffer[21];
@@ -57,7 +74,7 @@ void setup() {
   Serial.print("MAC Address: ");
   Serial.println(mac_address);
 
-  //  WiFi.config(local_ip, dns_server, gateway, subnet);
+  WiFi.config(local_ip, dns_server, gateway, subnet);
   WiFi.begin(ssid, pass);
 
   while (WiFi.status() != WL_CONNECTED) {
@@ -73,6 +90,19 @@ void setup() {
 }
 
 void loop() {
+  rssi = WiFi.RSSI();
+  // -30 to -90 dB
+  // -30 => good     => 12LED
+  // -90 => not good => 0LED
+  int n_led = map(rssi, -30, -90, 12, 0);
+  for (int i = 0; i < 12; i++) {
+    if (n_led > i)
+      frame[7][i] = 1;
+    else
+      frame[7][i] = 0;
+  }
+  matrix.renderBitmap(frame, 8, 12);
+
   WiFiClient client = server.available();
   if (client) {
     String currentLine = "";
@@ -125,14 +155,39 @@ void sendIndexPage(WiFiClient&client) {
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:text/html");
   client.println("Connection: close");
-  client.println();
-  client.println("<!DOCTYPE HTML>");
-  client.println("<html>");
-  client.println("<head><title>Arduino Web Server</title></head>");
+  client.println("");
+
+  client.println("<!DOCTYPE html>");
+  client.println("<html lang=\"en\">");
+  client.println("<head>");
+  client.println("<title>Flow Check</title>");
+  style(client);
+  client.println("</head>");
   client.println("<body>");
-  client.println("<h1>Welcome to Arduino Web Server</h1>");
-  client.println("<p><a href='/json'>JSON Data</a></p>");
-  client.println("<p><a href='/setting'>Settings</a></p>");
+  client.println("<h1>Flow Check</h1>");
+  head_link(client);
+  client.println("<div class=\"status-container\">");
+  client.println("    <div class=\"status-item\">");
+  client.println("        <span class=\"status-label\">Mac Address:</span>");
+  client.println("        <span>" + String(mac_address) + "</span>");
+  client.println("    </div>");
+  client.println("    <div class=\"status-item\">");
+  client.println("        <span class=\"status-label\">WiFi Signal Strength:</span>");
+  client.println("        <span>" + String(rssi) + "</span>");
+  client.println("    </div>");
+  client.println("    <div class=\"status-item\">");
+  client.println("        <span class=\"status-label\">ID:</span>");
+  client.println("        <span>" + String(id) + "</span>");
+  client.println("    </div>");
+  client.println("    <div class=\"status-item\">");
+  client.println("        <span class=\"status-label\">Machine Name:</span>");
+  client.println("        <span>" + String(machine_name) + "</span>");
+  client.println("    </div>");
+  client.println("    <div class=\"status-item\">");
+  client.println("        <span class=\"status-label\">Fix/Move:</span>");
+  client.println("        <span>" + String(fix_move) + "</span>");
+  client.println("    </div>");
+  client.println("</div>");
   client.println("</body>");
   client.println("</html>");
 }
@@ -168,20 +223,38 @@ void sendSettingsPage(WiFiClient&client) {
   client.println("Content-type:text/html");
   client.println("Connection: close");
   client.println();
-  client.println("<html><body>");
+
+  client.println("<!DOCTYPE html>");
+  client.println("<html lang=\"en\">");
+  client.println("<head>");
+  client.println("<title>Settings</title>");
+  style(client);
+  client.println("</head>");
+  client.println("<body>");
+  client.println("<h1>Settings</h1>");
+  head_link(client);
   client.println("<form action=\"/setting\" method=\"POST\">");
-  client.println("<label for=\"id\">ID:</label>");
-  client.println("<input type=\"text\" id=\"id\" name=\"id\" required><br><br>");
-  client.println("<label for=\"machine_name\">Machine Name:</label>");
-  client.println("<input type=\"text\" id=\"machine_name\" name=\"machine_name\" required><br><br>");
-  client.println("<label>Fix/Move:</label><br>");
-  client.println("<input type=\"radio\" id=\"fix\" name=\"fix_move\" value=\"fix\" checked>");
-  client.println("<label for=\"fix\">Fix</label><br>");
-  client.println("<input type=\"radio\" id=\"move\" name=\"fix_move\" value=\"move\">");
-  client.println("<label for=\"move\">Move</label><br><br>");
-  client.println("<input type=\"submit\" value=\"Submit\">");
+  client.println("    <fieldset>");
+  client.println("        <legend>ID:</legend>");
+  client.println("        <input type=\"text\" id=\"id\" name=\"id\" value=\"" + String(id) + "\">");
+  client.println("    </fieldset>");
+  client.println("    <fieldset>");
+  client.println("        <legend>Machine Name:</legend>");
+  client.println("        <input type=\"text\" id=\"machine_name\" name=\"machine_name\" value=\"" + String(machine_name) + "\">");
+  client.println("    </fieldset>");
+  client.println("    <fieldset>");
+  client.println("        <legend>Fix/Move:</legend>");
+  checked = (fix_move == "fix") ? "checked"  : "";
+  client.println("        <input type=\"radio\" id=\"fix\" name=\"fix_move\" value=\"fix\"" + checked + ">");
+  client.println("        <label for=\"fix\">Fix</label><br>");
+  checked = (fix_move == "move") ? "checked"  : "";
+  client.println("        <input type=\"radio\" id=\"move\" name=\"fix_move\" value=\"move\"" + checked + ">");
+  client.println("        <label for=\"move\">Move</label>");
+  client.println("    </fieldset>");
+  client.println("    <input type=\"submit\" value=\"Submit\">");
   client.println("</form>");
-  client.println("</body></html>");
+  client.println("</body>");
+  client.println("</html>");
 }
 
 void handlePostData(WiFiClient&client, String postData) {
@@ -194,12 +267,12 @@ void handlePostData(WiFiClient&client, String postData) {
     machine_name = postData.substring(machineNameIndex + 13, postData.indexOf('&', machineNameIndex));
     fix_move = postData.substring(fixMoveIndex + 9);
 
-    Serial.print("Updated ID: ");
-    Serial.println(id);
-    Serial.print("Updated Machine Name: ");
-    Serial.println(machine_name);
-    Serial.print("Updated Fix/Move: ");
-    Serial.println(fix_move);
+    //Serial.print("Updated ID: ");
+    //Serial.println(id);
+    //Serial.print("Updated Machine Name: ");
+    //Serial.println(machine_name);
+    //Serial.print("Updated Fix/Move: ");
+    //Serial.println(fix_move);
 
     EEPROM.write(idAddress, id);
     for (int i = 0; i < machine_name.length(); i++)
@@ -215,4 +288,101 @@ void handlePostData(WiFiClient&client, String postData) {
   client.println("Location: /setting");
   client.println("Connection: close");
   client.println();
+}
+
+void head_link(WiFiClient&client) {
+  client.println("<div class=\"nav-links\">");
+  client.println("    <a href='/'>Home</a>");
+  client.println("    <a href='/json'>JSON Data</a>");
+  client.println("    <a href='/setting'>Settings</a>");
+  client.println("</div>");
+}
+
+void style(WiFiClient&client) {
+  client.println("<style>");
+  client.println("body {");
+  client.println("    font-family: Arial, sans-serif;");
+  client.println("    line-height: 1.6;");
+  client.println("    color: #333;");
+  client.println("    max-width: 600px;");
+  client.println("    margin: 0 auto;");
+  client.println("    padding: 20px;");
+  client.println("    background-color: #f4f4f4;");
+  client.println("}");
+  client.println("h1 {");
+  client.println("    color: #2c3e50;");
+  client.println("    text-align: center;");
+  client.println("    border-bottom: 2px solid #3498db;");
+  client.println("    padding-bottom: 10px;");
+  client.println("}");
+  client.println("a {");
+  client.println("    color: #3498db;");
+  client.println("    text-decoration: none;");
+  client.println("}");
+  client.println("a:hover {");
+  client.println("    text-decoration: underline;");
+  client.println("}");
+  client.println(".nav-links {");
+  client.println("    display: flex;");
+  client.println("    justify-content: space-around;");
+  client.println("    margin-bottom: 20px;");
+  client.println("}");
+  client.println(".status-container {");
+  client.println("    background-color: white;");
+  client.println("    border-radius: 8px;");
+  client.println("    padding: 20px;");
+  client.println("    box-shadow: 0 2px 4px rgba(0,0,0,0.1);");
+  client.println("}");
+  client.println(".status-item {");
+  client.println("    margin-bottom: 10px;");
+  client.println("}");
+  client.println(".status-label {");
+  client.println("    font-weight: bold;");
+  client.println("    color: #2c3e50;");
+  client.println("}");
+  client.println("");
+  client.println("form {");
+  client.println("    background-color: white;");
+  client.println("    padding: 20px;");
+  client.println("    border-radius: 8px;");
+  client.println("    box-shadow: 0 2px 4px rgba(0,0,0,0.1);");
+  client.println("}");
+  client.println("fieldset {");
+  client.println("    border: 1px solid #ddd;");
+  client.println("    border-radius: 4px;");
+  client.println("    padding: 10px;");
+  client.println("    margin-bottom: 15px;");
+  client.println("}");
+  client.println("legend {");
+  client.println("    font-weight: bold;");
+  client.println("    color: #2c3e50;");
+  client.println("    padding: 0 5px;");
+  client.println("}");
+  client.println("input[type=\"text\"] {");
+  client.println("    width: 100%;");
+  client.println("    padding: 8px;");
+  client.println("    margin: 5px 0;");
+  client.println("    border: 1px solid #ddd;");
+  client.println("    border-radius: 4px;");
+  client.println("    box-sizing: border-box;");
+  client.println("}");
+  client.println("input[type=\"radio\"] {");
+  client.println("    margin-right: 5px;");
+  client.println("}");
+  client.println("label {");
+  client.println("    margin-right: 15px;");
+  client.println("}");
+  client.println("input[type=\"submit\"] {");
+  client.println("    background-color: #3498db;");
+  client.println("    color: white;");
+  client.println("    padding: 10px 15px;");
+  client.println("    border: none;");
+  client.println("    border-radius: 4px;");
+  client.println("    cursor: pointer;");
+  client.println("    font-size: 16px;");
+  client.println("}");
+  client.println("input[type=\"submit\"]:hover {");
+  client.println("    background-color: #2980b9;");
+  client.println("}");
+  client.println("</style>");
 }
