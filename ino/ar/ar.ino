@@ -2,8 +2,26 @@
 #include <ArduinoJson.h>
 #include <EEPROM.h>
 #include "Arduino_LED_Matrix.h"
+#define FLOW_FACTOR (1.0 / 7.5) // Pulse (Hz) = [7.5 x Flow Rate Q (L / min)] ±3%
+#define NUM_SENSORS 8
 
+int FLOW_PINS[NUM_SENSORS] = {1, 2, 3, 6, 8, 15, 16, 17};
+int pulse_counts[NUM_SENSORS] = {0};
 ArduinoLEDMatrix matrix;
+
+void on_trigger_handle0() {pulse_counts[0]++;}
+void on_trigger_handle1() {pulse_counts[1]++;}
+void on_trigger_handle2() {pulse_counts[2]++;}
+void on_trigger_handle3() {pulse_counts[3]++;}
+void on_trigger_handle4() {pulse_counts[4]++;}
+void on_trigger_handle5() {pulse_counts[5]++;}
+void on_trigger_handle6() {pulse_counts[6]++;}
+void on_trigger_handle7() {pulse_counts[7]++;}
+void (*interrupt_handlers[NUM_SENSORS])() = {
+  on_trigger_handle0, on_trigger_handle1, on_trigger_handle2, on_trigger_handle3,
+  on_trigger_handle4, on_trigger_handle5, on_trigger_handle6, on_trigger_handle7
+};
+
 byte frame[8][12] = {
   { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
   { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -15,9 +33,9 @@ byte frame[8][12] = {
   { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
 };
 
-const int idAddress = 0;
-const int machineNameAddress = idAddress + sizeof(int);
-const int fixMoveAddress = machineNameAddress + 20;
+int idAddress = 0;
+int machineNameAddress = idAddress + sizeof(int);
+int fixMoveAddress = machineNameAddress + 20;
 
 char ssid[] = "APHTV125";
 char pass[] = "#aphtv125@";
@@ -29,19 +47,22 @@ long rssi;
 int id;
 String machine_name;
 String fix_move;
-
-String checked;
+float flows[NUM_SENSORS] = {0};
 
 IPAddress local_ip(192, 168, 125, 243);
 IPAddress gateway(192, 168, 125, 254);
 IPAddress subnet(255, 255, 255, 0);
 IPAddress dns_server(192, 168, 225, 50);
-
 WiFiServer server(80);
 
 void setup() {
   Serial.begin(9600);
   matrix.begin();
+
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    pinMode(FLOW_PINS[i], INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(FLOW_PINS[i]), interrupt_handlers[i], RISING);
+  }
 
   id = EEPROM.read(idAddress);
   char machineNameBuffer[21];
@@ -90,6 +111,26 @@ void setup() {
 }
 
 void loop() {
+  ////  Measurement  ////
+  static unsigned long lastMeasurementTime = 0;
+  unsigned long currentTime = millis();
+  if (currentTime - lastMeasurementTime >= 1000) { // 1 second
+    noInterrupts();
+    int end_pulse_counts[NUM_SENSORS];
+    for (int i = 0; i < NUM_SENSORS; i++) {
+      end_pulse_counts[i] = pulse_counts[i];
+      pulse_counts[i] = 0;
+    }
+    interrupts();
+
+    lastMeasurementTime = currentTime;
+
+    for (int i = 0; i < NUM_SENSORS; i++) {
+      flows[i] = end_pulse_counts[i] * FLOW_FACTOR;
+    }
+  }
+
+  ////  Web server  ////
   rssi = WiFi.RSSI();
   // -30 to -90 dB
   // -30 => good     => 12LED
@@ -175,6 +216,8 @@ void sendIndexPage(WiFiClient&client) {
   client.println("        <span class=\"status-label\">WiFi Signal Strength:</span>");
   client.println("        <span>" + String(rssi) + "</span>");
   client.println("    </div>");
+  client.println("</div>");
+  client.println("<div class=\"status-container\">");
   client.println("    <div class=\"status-item\">");
   client.println("        <span class=\"status-label\">ID:</span>");
   client.println("        <span>" + String(id) + "</span>");
@@ -188,20 +231,28 @@ void sendIndexPage(WiFiClient&client) {
   client.println("        <span>" + String(fix_move) + "</span>");
   client.println("    </div>");
   client.println("</div>");
+  client.println("<div class=\"status-container\">");
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    client.println("    <div class=\"status-item\">");
+    client.println("        <span class=\"status-label\">flow" + String(i+1) + ":</span>");
+    client.println("        <span>" + String(flows[i]) + " L / min</span>");
+    client.println("    </div>");
+  }
+  client.println("</div>");
   client.println("</body>");
   client.println("</html>");
 }
 
 void sendJsonData(WiFiClient&client) {
   StaticJsonDocument<200> doc;
-  doc["MAC Address"] = mac_address;
+  doc["mac address"] = mac_address;
   doc["id"] = id;
-  doc["machine_name"] = machine_name;
+  doc["machine name"] = machine_name;
   doc["fix_move"] = fix_move;
   doc["status"] = "ok";
   JsonArray result = doc.createNestedArray("result");
-  for (int i = 0; i < 6; i++) {
-    result.add(random(2));
+  for (int i = 0; i < 8; i++) {
+    result.add(flows[i]);
   }
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:application/json");
@@ -244,7 +295,7 @@ void sendSettingsPage(WiFiClient&client) {
   client.println("    </fieldset>");
   client.println("    <fieldset>");
   client.println("        <legend>Fix/Move:</legend>");
-  checked = (fix_move == "fix") ? "checked"  : "";
+  String checked = (fix_move == "fix") ? "checked"  : "";
   client.println("        <input type=\"radio\" id=\"fix\" name=\"fix_move\" value=\"fix\"" + checked + ">");
   client.println("        <label for=\"fix\">Fix</label><br>");
   checked = (fix_move == "move") ? "checked"  : "";
@@ -266,14 +317,12 @@ void handlePostData(WiFiClient&client, String postData) {
     id = postData.substring(idIndex + 3, postData.indexOf('&', idIndex)).toInt();
     machine_name = postData.substring(machineNameIndex + 13, postData.indexOf('&', machineNameIndex));
     fix_move = postData.substring(fixMoveIndex + 9);
-
     //Serial.print("Updated ID: ");
     //Serial.println(id);
     //Serial.print("Updated Machine Name: ");
     //Serial.println(machine_name);
     //Serial.print("Updated Fix/Move: ");
     //Serial.println(fix_move);
-
     EEPROM.write(idAddress, id);
     for (int i = 0; i < machine_name.length(); i++)
       EEPROM.write(machineNameAddress + i, machine_name[i]);
@@ -331,6 +380,7 @@ void style(WiFiClient&client) {
   client.println("    background-color: white;");
   client.println("    border-radius: 8px;");
   client.println("    padding: 20px;");
+  client.println("    margin-bottom: 10px;");
   client.println("    box-shadow: 0 2px 4px rgba(0,0,0,0.1);");
   client.println("}");
   client.println(".status-item {");
