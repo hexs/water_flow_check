@@ -49,52 +49,26 @@ String machine_name;
 String fix_move;
 float flows[NUM_SENSORS] = {0};
 
-IPAddress local_ip(192, 168, 125, 243);
-IPAddress gateway(192, 168, 125, 254);
-IPAddress subnet(255, 255, 255, 0);
-IPAddress dns_server(192, 168, 225, 50);
 WiFiServer server(80);
 
 void setup() {
   Serial.begin(9600);
   matrix.begin();
-
   for (int i = 0; i < NUM_SENSORS; i++) {
     pinMode(FLOW_PINS[i], INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(FLOW_PINS[i]), interrupt_handlers[i], RISING);
   }
-
-  id = EEPROM.read(idAddress);
-  char machineNameBuffer[21];
-  for (int i = 0; i < 20; i++) {
-    machineNameBuffer[i] = EEPROM.read(machineNameAddress + i);
-  }
-  machineNameBuffer[20] = '\0';
-  machine_name = String(machineNameBuffer);
-
-  char fixMoveBuffer[5];
-  for (int i = 0; i < 4; i++) {
-    fixMoveBuffer[i] = EEPROM.read(fixMoveAddress + i);
-  }
-  fixMoveBuffer[4] = '\0';
-  fix_move = String(fixMoveBuffer);
+  getMACAddress();
+  EEPROMread();
 
   if (WiFi.status() == WL_NO_MODULE) {
     Serial.println("Communication with WiFi module failed!");
     while (true);
   }
-  byte mac[6];
-  WiFi.macAddress(mac);
-  for (int i = 5; i >= 0; i--) {
-    if (mac[i] < 16)
-      mac_address += "0";
-    mac_address += String(mac[i], HEX);
-    if (i > 0)
-      mac_address += ":";
-  }
-  Serial.print("MAC Address: ");
-  Serial.println(mac_address);
-
+  IPAddress local_ip(192, 168, 125, 243);
+  IPAddress dns_server(192, 168, 225, 50);
+  IPAddress gateway(192, 168, 125, 254);
+  IPAddress subnet(255, 255, 255, 0);
   WiFi.config(local_ip, dns_server, gateway, subnet);
   WiFi.begin(ssid, pass);
 
@@ -102,7 +76,6 @@ void setup() {
     delay(500);
     Serial.println("Connecting to WiFi...");
   }
-
   Serial.println("Connected to WiFi");
   Serial.print("IP Address: ");
   Serial.println(WiFi.localIP());
@@ -214,7 +187,7 @@ void sendIndexPage(WiFiClient&client) {
   client.println("    </div>");
   client.println("    <div class=\"status-item\">");
   client.println("        <span class=\"status-label\">WiFi Signal Strength:</span>");
-  client.println("        <span>" + String(rssi) + "</span>");
+  client.println("        <span>" + String(rssi) + " dB</span>");
   client.println("    </div>");
   client.println("</div>");
   client.println("<div class=\"status-container\">");
@@ -234,7 +207,7 @@ void sendIndexPage(WiFiClient&client) {
   client.println("<div class=\"status-container\">");
   for (int i = 0; i < NUM_SENSORS; i++) {
     client.println("    <div class=\"status-item\">");
-    client.println("        <span class=\"status-label\">flow" + String(i+1) + ":</span>");
+    client.println("        <span class=\"status-label\">flow" + String(i + 1) + ":</span>");
     client.println("        <span>" + String(flows[i]) + " L / min</span>");
     client.println("    </div>");
   }
@@ -288,10 +261,12 @@ void sendSettingsPage(WiFiClient&client) {
   client.println("    <fieldset>");
   client.println("        <legend>ID:</legend>");
   client.println("        <input type=\"text\" id=\"id\" name=\"id\" value=\"" + String(id) + "\">");
+  client.println("        <a class=\"setting-note\">* ID is a value between 0 - 255.</a>");
   client.println("    </fieldset>");
   client.println("    <fieldset>");
   client.println("        <legend>Machine Name:</legend>");
   client.println("        <input type=\"text\" id=\"machine_name\" name=\"machine_name\" value=\"" + String(machine_name) + "\">");
+  client.println("        <a class=\"setting-note\">* Machine Name must not exceed 20 characters.</a>");
   client.println("    </fieldset>");
   client.println("    <fieldset>");
   client.println("        <legend>Fix/Move:</legend>");
@@ -341,9 +316,9 @@ void handlePostData(WiFiClient&client, String postData) {
 
 void head_link(WiFiClient&client) {
   client.println("<div class=\"nav-links\">");
-  client.println("    <a href='/'>Home</a>");
-  client.println("    <a href='/json'>JSON Data</a>");
-  client.println("    <a href='/setting'>Settings</a>");
+  client.println("    <a class =\"button_page\" href='/'>Home</a>");
+  client.println("    <a class =\"button_page\" href='/json'>JSON Data</a>");
+  client.println("    <a class =\"button_page\" href='/setting'>Settings</a>");
   client.println("</div>");
 }
 
@@ -364,12 +339,21 @@ void style(WiFiClient&client) {
   client.println("    border-bottom: 2px solid #3498db;");
   client.println("    padding-bottom: 10px;");
   client.println("}");
-  client.println("a {");
+  client.println("a.button_page {");
   client.println("    color: #3498db;");
   client.println("    text-decoration: none;");
+  client.println("    padding: 10px;");
+  client.println("    background-color: #eee;");
+  client.println("    border-radius: 4px;");
+  client.println("    cursor: pointer;");
   client.println("}");
-  client.println("a:hover {");
+  client.println("a.button_page:hover {");
   client.println("    text-decoration: underline;");
+  client.println("    background-color: #dfdfdf;");
+  client.println("}");
+  client.println("a.setting-note {");
+  client.println("    font-size: 14px;");
+  client.println("    color: #ccc;");
   client.println("}");
   client.println(".nav-links {");
   client.println("    display: flex;");
@@ -435,4 +419,36 @@ void style(WiFiClient&client) {
   client.println("    background-color: #2980b9;");
   client.println("}");
   client.println("</style>");
+}
+
+void getMACAddress() {
+  byte mac[6];
+  WiFi.macAddress(mac);
+  for (int i = 5; i >= 0; i--) {
+    if (mac[i] < 16)
+      mac_address += "0";
+    mac_address += String(mac[i], HEX);
+    if (i > 0)
+      mac_address += ":";
+  }
+  Serial.print("MAC Address: ");
+  Serial.println(mac_address);
+}
+
+void EEPROMread() {
+  id = EEPROM.read(idAddress);
+
+  char machineNameBuffer[21];
+  for (int i = 0; i < 20; i++) {
+    machineNameBuffer[i] = EEPROM.read(machineNameAddress + i);
+  }
+  machineNameBuffer[20] = '\0';
+  machine_name = String(machineNameBuffer);
+
+  char fixMoveBuffer[5];
+  for (int i = 0; i < 4; i++) {
+    fixMoveBuffer[i] = EEPROM.read(fixMoveAddress + i);
+  }
+  fixMoveBuffer[4] = '\0';
+  fix_move = String(fixMoveBuffer);
 }
