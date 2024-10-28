@@ -1,11 +1,22 @@
+#include <Wire.h>
+#include "LiquidCrystal_I2C.h"
 #include <WiFiS3.h>
 #include <ArduinoJson.h>
 #include <EEPROM.h>
 #include "Arduino_LED_Matrix.h"
 #define FLOW_FACTOR (1.0 / 7.5) // Pulse (Hz) = [7.5 x Flow Rate Q (L / min)] ±3%
-#define NUM_SENSORS 8
+#define NUM_SENSORS 6
 
-int FLOW_PINS[NUM_SENSORS] = {1, 2, 3, 6, 8, 15, 16, 17};
+LiquidCrystal_I2C lcds[NUM_SENSORS] = {
+  LiquidCrystal_I2C (0x20, 16, 2),
+  LiquidCrystal_I2C (0x21, 16, 2),
+  LiquidCrystal_I2C (0x22, 16, 2),
+  LiquidCrystal_I2C (0x23, 16, 2),
+  LiquidCrystal_I2C (0x24, 16, 2),
+  LiquidCrystal_I2C (0x25, 16, 2)
+};
+
+int FLOW_PINS[NUM_SENSORS] = {2, 3, 6, 8, 15, 16};
 int pulse_counts[NUM_SENSORS] = {0};
 ArduinoLEDMatrix matrix;
 
@@ -15,11 +26,8 @@ void on_trigger_handle2() {pulse_counts[2]++;}
 void on_trigger_handle3() {pulse_counts[3]++;}
 void on_trigger_handle4() {pulse_counts[4]++;}
 void on_trigger_handle5() {pulse_counts[5]++;}
-void on_trigger_handle6() {pulse_counts[6]++;}
-void on_trigger_handle7() {pulse_counts[7]++;}
 void (*interrupt_handlers[NUM_SENSORS])() = {
-  on_trigger_handle0, on_trigger_handle1, on_trigger_handle2, on_trigger_handle3,
-  on_trigger_handle4, on_trigger_handle5, on_trigger_handle6, on_trigger_handle7
+  on_trigger_handle0, on_trigger_handle1, on_trigger_handle2, on_trigger_handle3, on_trigger_handle4, on_trigger_handle5
 };
 
 byte frame[8][12] = {
@@ -55,6 +63,8 @@ void setup() {
   Serial.begin(9600);
   matrix.begin();
   for (int i = 0; i < NUM_SENSORS; i++) {
+    lcds[i].begin();
+    lcds[i].backlight();
     pinMode(FLOW_PINS[i], INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(FLOW_PINS[i]), interrupt_handlers[i], RISING);
   }
@@ -100,6 +110,7 @@ void loop() {
 
     for (int i = 0; i < NUM_SENSORS; i++) {
       flows[i] = end_pulse_counts[i] * FLOW_FACTOR;
+      updateLCD(i, flows[i]);
     }
   }
 
@@ -126,9 +137,11 @@ void loop() {
     while (client.connected()) {
       if (client.available()) {
         char c = client.read();
-        Serial.write(c);
+        // Serial.write(c);
 
         if (c == '\n') {
+          if (currentLine[0] == 'G' or currentLine[0] == 'P')
+            Serial.println(currentLine);
           if (currentLine.length() == 0) {
             if (isPostRequest) {
               while (client.available()) {
@@ -165,7 +178,7 @@ void loop() {
   }
 }
 
-void sendIndexPage(WiFiClient&client) {
+void sendIndexPage(WiFiClient & client) {
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:text/html");
   client.println("Connection: close");
@@ -216,7 +229,7 @@ void sendIndexPage(WiFiClient&client) {
   client.println("</html>");
 }
 
-void sendJsonData(WiFiClient&client) {
+void sendJsonData(WiFiClient & client) {
   StaticJsonDocument<200> doc;
   doc["mac address"] = mac_address;
   doc["id"] = id;
@@ -224,7 +237,7 @@ void sendJsonData(WiFiClient&client) {
   doc["fix_move"] = fix_move;
   doc["status"] = "ok";
   JsonArray result = doc.createNestedArray("result");
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < NUM_SENSORS; i++) {
     result.add(flows[i]);
   }
   client.println("HTTP/1.1 200 OK");
@@ -234,7 +247,7 @@ void sendJsonData(WiFiClient&client) {
   serializeJson(doc, client);
 }
 
-void send404(WiFiClient&client) {
+void send404(WiFiClient & client) {
   client.println("HTTP/1.1 404 Not Found");
   client.println("Content-type:text/html");
   client.println("Connection: close");
@@ -242,7 +255,7 @@ void send404(WiFiClient&client) {
   client.println("<html><body><h1>404: Not Found</h1></body></html>");
 }
 
-void sendSettingsPage(WiFiClient&client) {
+void sendSettingsPage(WiFiClient & client) {
   client.println("HTTP/1.1 200 OK");
   client.println("Content-type:text/html");
   client.println("Connection: close");
@@ -283,7 +296,7 @@ void sendSettingsPage(WiFiClient&client) {
   client.println("</html>");
 }
 
-void handlePostData(WiFiClient&client, String postData) {
+void handlePostData(WiFiClient & client, String postData) {
   int idIndex = postData.indexOf("id=");
   int machineNameIndex = postData.indexOf("machine_name=");
   int fixMoveIndex = postData.indexOf("fix_move=");
@@ -314,7 +327,7 @@ void handlePostData(WiFiClient&client, String postData) {
   client.println();
 }
 
-void head_link(WiFiClient&client) {
+void head_link(WiFiClient & client) {
   client.println("<div class=\"nav-links\">");
   client.println("    <a class =\"button_page\" href='/'>Home</a>");
   client.println("    <a class =\"button_page\" href='/json'>JSON Data</a>");
@@ -322,7 +335,7 @@ void head_link(WiFiClient&client) {
   client.println("</div>");
 }
 
-void style(WiFiClient&client) {
+void style(WiFiClient & client) {
   client.println("<style>");
   client.println("body {");
   client.println("    font-family: Arial, sans-serif;");
@@ -451,4 +464,15 @@ void EEPROMread() {
   }
   fixMoveBuffer[4] = '\0';
   fix_move = String(fixMoveBuffer);
+}
+
+void updateLCD(int index, float flow) {
+  lcds[index].clear();
+  lcds[index].setCursor(0, 0);
+  lcds[index].print("Flow rate ");
+  lcds[index].print(index + 1);
+  lcds[index].print(": ");
+  lcds[index].setCursor(0, 1);
+  lcds[index].print(flow, 2);
+  lcds[index].print(" L/min");
 }
