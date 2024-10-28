@@ -55,6 +55,7 @@ long rssi;
 int id;
 String machine_name;
 String fix_move;
+String status;
 float flows[NUM_SENSORS] = {0};
 
 WiFiServer server(80);
@@ -108,9 +109,13 @@ void loop() {
 
     lastMeasurementTime = currentTime;
 
+    status = "ok";
     for (int i = 0; i < NUM_SENSORS; i++) {
       flows[i] = end_pulse_counts[i] * FLOW_FACTOR;
       updateLCD(i, flows[i]);
+      if (1.0 < flows[i] && flows[i] < 5.0) {
+        status = "not ok";
+      }
     }
   }
 
@@ -218,6 +223,10 @@ void sendIndexPage(WiFiClient & client) {
   client.println("    </div>");
   client.println("</div>");
   client.println("<div class=\"status-container\">");
+  client.println("    <div class=\"status-item\">");
+  client.println("        <span class=\"status-label\">Status:</span>");
+  client.println("        <span>" + String(status) + "</span>");
+  client.println("    </div>");
   for (int i = 0; i < NUM_SENSORS; i++) {
     client.println("    <div class=\"status-item\">");
     client.println("        <span class=\"status-label\">flow" + String(i + 1) + ":</span>");
@@ -235,7 +244,7 @@ void sendJsonData(WiFiClient & client) {
   doc["id"] = id;
   doc["machine name"] = machine_name;
   doc["fix_move"] = fix_move;
-  doc["status"] = "ok";
+  doc["status"] = status;
   JsonArray result = doc.createNestedArray("result");
   for (int i = 0; i < NUM_SENSORS; i++) {
     result.add(flows[i]);
