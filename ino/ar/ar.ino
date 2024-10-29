@@ -17,6 +17,8 @@ LiquidCrystal_I2C lcds[NUM_SENSORS] = {
 };
 
 int FLOW_PINS[NUM_SENSORS] = {2, 3, 6, 8, 15, 16};
+int LED_PINS[NUM_SENSORS] = {4, 5, 7, 9, 10, 11};
+int BUZZER_PIN = 17;
 int pulse_counts[NUM_SENSORS] = {0};
 ArduinoLEDMatrix matrix;
 
@@ -57,6 +59,7 @@ String machine_name;
 String fix_move;
 String status;
 float flows[NUM_SENSORS] = {0};
+bool After500ms = 0;
 
 WiFiServer server(80);
 
@@ -67,6 +70,7 @@ void setup() {
     lcds[i].begin();
     lcds[i].backlight();
     pinMode(FLOW_PINS[i], INPUT_PULLUP);
+    pinMode(LED_PINS[i], OUTPUT);
     attachInterrupt(digitalPinToInterrupt(FLOW_PINS[i]), interrupt_handlers[i], RISING);
   }
   getMACAddress();
@@ -115,8 +119,20 @@ void loop() {
       updateLCD(i, flows[i]);
       if (1.0 < flows[i] && flows[i] < 5.0) {
         status = "not ok";
+        digitalWrite(LED_PINS[i], 1);
+        digitalWrite(BUZZER_PIN, 1);
+      }
+      else {
+        digitalWrite(LED_PINS[i], 0);
       }
     }
+    After500ms = 1;
+  }
+  if (currentTime - lastMeasurementTime >= 500 && After500ms) {
+    After500ms = 0;
+    digitalWrite(BUZZER_PIN, 0);
+    for (int i = 0; i < NUM_SENSORS; i++)
+      digitalWrite(LED_PINS[i], 0);
   }
 
   ////  Web server  ////
